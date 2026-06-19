@@ -4,7 +4,9 @@ from agents.parser import extract_constraints
 from agents.pattern_detector import detect_patterns
 from agents.solver import generate_approaches, generate_code
 from agents.debugger import debug_code
-from agents.tracker import add_solved_problem, get_stats, load_progress, get_revision_suggestions
+from agents.executor import execute_code
+from agents.visualizer import generate_complexity_data
+from agents.tracker import add_solved_problem, get_stats, load_progress, get_revision_suggestions, merge_progress
 
 # Configure page
 st.set_page_config(
@@ -115,6 +117,8 @@ def main():
             st.metric("Solved", stats['total'])
         with col2:
             st.metric("Revisions", stats['total_revisions'])
+            
+        st.markdown(f'<div style="text-align: center; margin-top: 10px; margin-bottom: 15px;"><span style="font-size: 1.5rem;">🔥 {stats.get("streak", 0)} Day Streak</span></div>', unsafe_allow_html=True)
             
         st.progress(min(stats['total'] / 100, 1.0)) # Assuming 100 is the goal
         st.caption("Road to 100 problems")
@@ -236,6 +240,21 @@ def render_solve_problem_ui():
                     st.write(f"**Dry Run:** {approaches['optimal']['dry_run']}")
                     st.markdown(f'<span class="badge badge-success">Time: {approaches["optimal"]["time_complexity"]}</span> <span class="badge badge-success">Space: {approaches["optimal"]["space_complexity"]}</span>', unsafe_allow_html=True)
 
+            if "brute_force" in approaches and "optimal" in approaches:
+                st.markdown("### 📈 Time Complexity Comparison")
+                brute_time = approaches["brute_force"]["time_complexity"]
+                optimal_time = approaches["optimal"]["time_complexity"]
+                
+                brute_data = generate_complexity_data(brute_time)
+                optimal_data = generate_complexity_data(optimal_time)
+                
+                chart_df = pd.DataFrame({
+                    "Brute Force": brute_data,
+                    "Optimal": optimal_data
+                })
+                
+                st.line_chart(chart_df, height=300)
+
         with st.spinner("💻 Generating code templates..."):
             codes = generate_code(problem_statement)
             if codes:
@@ -264,8 +283,8 @@ def render_hints_ui():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_debug_ui():
-    st.markdown('<div class="gradient-text">Smart Debugger</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Paste your code to detect syntax and deep logic errors.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gradient-text">Smart Debugger & Playground</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Paste your code to detect syntax and logic errors, or run it directly.</div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -273,7 +292,15 @@ def render_debug_ui():
     with col2:
         user_code = st.text_area("Your Code", height=300, placeholder="Paste your code here...")
 
-    if st.button("Debug Code", type="primary"):
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        debug_pressed = st.button("Debug Code", type="primary", use_container_width=True)
+        
+    with col_btn2:
+        run_pressed = st.button("Run Code 🚀", use_container_width=True)
+
+    if debug_pressed:
         with st.spinner("Hunting for bugs..."):
             result = debug_code(user_code, language)
             
@@ -297,6 +324,22 @@ def render_debug_ui():
             if "corrected_code" in result and result["corrected_code"] != user_code:
                 st.markdown("### 🛠️ Proposed Fix")
                 st.code(result["corrected_code"], language=language.lower())
+                
+    if run_pressed:
+        if language != "Python":
+            st.warning("Currently, execution is only supported for Python.")
+        else:
+            with st.spinner("Executing code..."):
+                result = execute_code(user_code)
+                st.markdown("### 🖥️ Console Output")
+                if result["output"]:
+                    st.code(result["output"], language="text")
+                else:
+                    st.info("No output returned.")
+                
+                if result["error"]:
+                    st.markdown("### ❌ Runtime Error")
+                    st.error(result["error"])
 
 def render_progress_ui():
     st.markdown('<div class="gradient-text">Progress Tracker</div>', unsafe_allow_html=True)
@@ -332,6 +375,38 @@ def render_progress_ui():
         display_df = df[["date_solved", "name", "difficulty", "topic", "attempts", "mistakes", "revision_count"]]
         display_df.columns = ["Date Solved", "Problem", "Difficulty", "Topic", "Attempts", "Mistakes", "Revisions"]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("### 💾 Data Management")
+        col_export, col_import = st.columns(2)
+        
+        with col_export:
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown("#### Export Progress")
+            csv = pd.DataFrame(data).to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download as CSV 📥",
+                data=csv,
+                file_name='leetcode_progress.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col_import:
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown("#### Import Progress")
+            uploaded_file = st.file_uploader("Upload CSV", type=['csv'], label_visibility="collapsed")
+            if uploaded_file is not None:
+                try:
+                    import_df = pd.read_csv(uploaded_file)
+                    new_data = import_df.to_dict(orient='records')
+                    res = merge_progress(new_data)
+                    if res["success"]:
+                        st.success(res["message"])
+                except Exception as e:
+                    st.error(f"Error importing file: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
     else:
         st.info("No problems tracked yet.")
 def generate_hints(problem):

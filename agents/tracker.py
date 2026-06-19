@@ -87,7 +87,8 @@ def get_stats() -> dict:
         "Medium": 0,
         "Hard": 0,
         "topics": {},
-        "total_revisions": 0
+        "total_revisions": 0,
+        "streak": get_streak(data)
     }
     
     for p in data:
@@ -129,3 +130,58 @@ def get_revision_suggestions() -> list:
     # Sort so most critical are first
     suggestions.sort(key=lambda x: x["problem"].get("mistakes", 0), reverse=True)
     return suggestions[:5] # Return top 5
+
+def merge_progress(new_data: list) -> dict:
+    """Merges new progress data (e.g. from an uploaded file) with existing data."""
+    existing = load_progress()
+    existing_names = {p['name'].lower() for p in existing}
+    
+    added_count = 0
+    for p in new_data:
+        if 'name' in p and p['name'].lower() not in existing_names:
+            p['id'] = len(existing) + 1
+            existing.append(p)
+            existing_names.add(p['name'].lower())
+            added_count += 1
+            
+    if added_count > 0:
+        save_progress(existing)
+        return {"success": True, "message": f"Successfully imported {added_count} new problems!"}
+    return {"success": True, "message": "No new problems to import."}
+
+def get_streak(data: list = None) -> int:
+    """Calculates the current daily streak of problems solved."""
+    if data is None:
+        data = load_progress()
+        
+    if not data:
+        return 0
+        
+    dates = set()
+    for p in data:
+        try:
+            date_obj = datetime.strptime(p['date_solved'], "%Y-%m-%d").date()
+            dates.add(date_obj)
+        except ValueError:
+            pass
+            
+    if not dates:
+        return 0
+        
+    sorted_dates = sorted(list(dates), reverse=True)
+    today = datetime.now().date()
+    
+    if sorted_dates[0] != today and sorted_dates[0] != today - timedelta(days=1):
+        return 0
+        
+    streak = 1
+    current_date = sorted_dates[0]
+    
+    for i in range(1, len(sorted_dates)):
+        if sorted_dates[i] == current_date - timedelta(days=1):
+            streak += 1
+            current_date = sorted_dates[i]
+        else:
+            break
+            
+    return streak
